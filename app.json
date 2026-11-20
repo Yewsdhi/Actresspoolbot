@@ -1,0 +1,36 @@
+{
+  "name": "Bollywood Auction Poll Bot",
+  "description": "Telegram team auction and photo-poll competition bot",
+  "repository": "https://github.com/",
+  "keywords": [
+    "telegram",
+    "auction",
+    "poll",
+    "python"
+  ],
+  "env": {
+    "BOT_TOKEN": {
+      "description": "Telegram bot token from BotFather",
+      "required": true
+    },
+    "ADMIN_IDS": {
+      "description": "Comma-separated Telegram numeric user IDs",
+      "required": true
+    },
+    "STARTING_COINS": {
+      "description": "Starting coins per team",
+      "value": "300"
+    }
+  },
+  "formation": {
+    "worker": {
+      "quantity": 1,
+      "size": "eco"
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ]
+}
