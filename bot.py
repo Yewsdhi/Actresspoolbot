@@ -1,6 +1,8 @@
 
 import os, logging, random, sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram.constants import ParseMode
+from html import escape
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 TOKEN=os.getenv("BOT_TOKEN","")
@@ -36,7 +38,7 @@ def menu():
     return InlineKeyboardMarkup([
       [InlineKeyboardButton("➕ Add Team",callback_data="cmd:addteam"),InlineKeyboardButton("👥 Teams",callback_data="cmd:teams")],
       [InlineKeyboardButton("👤 My Team",callback_data="profile"),InlineKeyboardButton("🏆 Leaderboard",callback_data="leader")],
-      [InlineKeyboardButton("🎬 Actress List",callback_data="list"),InlineKeyboardButton("🎯 Guess",callback_data="guess")],
+      [InlineKeyboardButton("🔗 All Actress Links",callback_data="list"),InlineKeyboardButton("🎯 Guess",callback_data="guess")],
       [InlineKeyboardButton("🎁 Daily",callback_data="daily"),InlineKeyboardButton("🔨 Start Auction",callback_data="cmd:startauction")],
       [InlineKeyboardButton("⏭ Skip Auction",callback_data="cmd:skip"),InlineKeyboardButton("📋 Queue",callback_data="cmd:queue")],
       [InlineKeyboardButton("🗳 Start Poll",callback_data="cmd:pollstart"),InlineKeyboardButton("📊 End Poll",callback_data="cmd:endpoll")],
@@ -78,8 +80,28 @@ async def leaderboard(u,c):
     rows=run("SELECT t.name,t.coins,COUNT(r.actress) n FROM teams t LEFT JOIN roster r ON r.team=t.id WHERE t.chat=? GROUP BY t.id ORDER BY n DESC,t.coins DESC",(u.effective_chat.id,)).fetchall()
     await u.effective_message.reply_text("🏆 LEADERBOARD\n"+("\n".join(f"{i}. {x['name']} — {x['n']}/5 · {x['coins']} coins" for i,x in enumerate(rows,1)) if rows else "No teams yet."))
 async def list_actresses(u,c):
-    rows=run("SELECT name,price,used FROM actresses ORDER BY name").fetchall()
-    await u.effective_message.reply_text("🎬 ACTRESS LIST\n"+("\n".join(f"{x['name']} — {x['price']} coins"+(" (auctioned)" if x['used'] else "") for x in rows) if rows else "List empty. Admin: /addactress Name, Price, ImageURL"))
+    rows=run("SELECT name,price,image,used FROM actresses ORDER BY name COLLATE NOCASE").fetchall()
+    if not rows:
+        return await u.effective_message.reply_text("🎬 Actress list is empty. Admin: /addactress Name, Price, ImageURL")
+    lines=[]
+    for i,x in enumerate(rows,1):
+        name=escape(x["name"])
+        image=(x["image"] or "").strip()
+        status=" · Auctioned" if x["used"] else " · Available"
+        if image.startswith(("https://","http://")):
+            lines.append(f'{i}. <a href="{escape(image, quote=True)}">{name}</a> — {x["price"]} coins{status}')
+        else:
+            lines.append(f"{i}. {name} — {x['price']} coins{status} · No image link")
+    chunks=[]
+    current="🔗 <b>ALL ACTRESS LINKS</b>\\n"
+    for line in lines:
+        if len(current)+len(line)+1>3500:
+            chunks.append(current)
+            current="🔗 <b>ALL ACTRESS LINKS (continued)</b>\\n"
+        current+=line+"\\n"
+    if current.strip(): chunks.append(current)
+    for chunk in chunks:
+        await u.effective_message.reply_text(chunk,parse_mode=ParseMode.HTML,disable_web_page_preview=True)
 async def addactress(u,c):
     if not is_admin(u.effective_user.id): return await u.effective_message.reply_text("Admin only.")
     p=u.effective_message.text.partition(" ")[2].split(",",2)
@@ -238,7 +260,8 @@ def main():
           BotCommand("myteam","Show your team and roster"),
           BotCommand("teams","List registered teams"),
           BotCommand("leaderboard","Show team leaderboard"),
-          BotCommand("list","Show actress list"),
+          BotCommand("list","Show all actresses with clickable image links"),
+          BotCommand("actresslist","Show all actresses with clickable image links"),
           BotCommand("guess","Guess the actress"),
           BotCommand("daily","Daily challenge"),
           BotCommand("startauction","Start or vote for auction"),
@@ -255,7 +278,7 @@ def main():
         ]
         await application.bot.set_my_commands(commands)
     app.post_init=set_command_menu
-    for name,fn in [("start",start),("help",start),("addteam",addteam),("myteam",myteam),("teams",teams),("leaderboard",leaderboard),("list",list_actresses),("addactress",addactress),("addquestion",addquestion),("guess",guess),("daily",daily),("startauction",startauction),("skip",skip),("next",next_cmd),("endauction",endauction),("submit",submit),("queue",queue),("pollstart",pollstart),("endpoll",endpoll),("guessleaderboard",scoreboard)]:
+    for name,fn in [("start",start),("help",start),("addteam",addteam),("myteam",myteam),("teams",teams),("leaderboard",leaderboard),("list",list_actresses),("actresslist",list_actresses),("addactress",addactress),("addquestion",addquestion),("guess",guess),("daily",daily),("startauction",startauction),("skip",skip),("next",next_cmd),("endauction",endauction),("submit",submit),("queue",queue),("pollstart",pollstart),("endpoll",endpoll),("guessleaderboard",scoreboard)]:
         app.add_handler(CommandHandler(name,fn))
     app.add_handler(CallbackQueryHandler(buttons,pattern="^(guess|auction|profile|leader|list|finale|daily|help)$"))
     app.add_handler(CallbackQueryHandler(hint_button,pattern="^hint:"))
