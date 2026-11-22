@@ -18,7 +18,11 @@ def init():
     run("CREATE TABLE IF NOT EXISTS teams(id INTEGER PRIMARY KEY,chat INTEGER,owner INTEGER,name TEXT,coins INTEGER,UNIQUE(chat,owner),UNIQUE(chat,name))")
     run("CREATE TABLE IF NOT EXISTS actresses(id INTEGER PRIMARY KEY,name TEXT UNIQUE,price INTEGER,image TEXT,used INTEGER DEFAULT 0)")
     run("CREATE TABLE IF NOT EXISTS roster(team INTEGER,actress INTEGER,paid INTEGER,UNIQUE(team,actress))")
+    run("CREATE TABLE IF NOT EXISTS team_members(team INTEGER,user INTEGER,joined_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(team,user))")
+    run("CREATE TABLE IF NOT EXISTS daily_claims(chat INTEGER,user INTEGER,day TEXT,UNIQUE(chat,user,day))")
+    run("INSERT OR IGNORE INTO team_members(team,user) SELECT id,owner FROM teams")
     run("CREATE TABLE IF NOT EXISTS auction(chat INTEGER PRIMARY KEY,actress INTEGER,bid INTEGER,bidder INTEGER)")
+    run("CREATE TABLE IF NOT EXISTS actress_used(chat INTEGER,actress INTEGER,UNIQUE(chat,actress))")
     run("CREATE TABLE IF NOT EXISTS votes(chat INTEGER,user INTEGER,kind TEXT,UNIQUE(chat,user,kind))")
     run("CREATE TABLE IF NOT EXISTS scores(user INTEGER PRIMARY KEY,points INTEGER DEFAULT 0,streak INTEGER DEFAULT 0)")
     run("CREATE TABLE IF NOT EXISTS questions(id INTEGER PRIMARY KEY,answer TEXT,hint TEXT,image TEXT,active INTEGER DEFAULT 1)")
@@ -27,8 +31,8 @@ def init():
     run("CREATE TABLE IF NOT EXISTS pollvotes(submission INTEGER,user INTEGER,UNIQUE(submission,user))")
 init()
 def is_admin(uid): return uid in ADMINS
-def team(chat,uid): 
-    r=run("SELECT * FROM teams WHERE chat=? AND owner=?",(chat,uid)).fetchone(); return r
+def team(chat,uid):
+    return run("SELECT t.* FROM teams t LEFT JOIN team_members m ON m.team=t.id WHERE t.chat=? AND (t.owner=? OR m.user=?) ORDER BY t.id LIMIT 1",(chat,uid,uid)).fetchone()
 def roster(tid):
     return run("SELECT a.name,r.paid FROM roster r JOIN actresses a ON a.id=r.actress WHERE r.team=?",(tid,)).fetchall()
 def menu():
@@ -55,9 +59,52 @@ async def addteam(u,c):
     if not c.args: return await u.effective_message.reply_text("Use: /addteam Royal")
     name=" ".join(c.args)
     try:
-        run("INSERT INTO teams(chat,owner,name,coins) VALUES(?,?,?,300)",(u.effective_chat.id,u.effective_user.id,name))
+        cur=run("INSERT INTO teams(chat,owner,name,coins) VALUES(?,?,?,300)",(u.effective_chat.id,u.effective_user.id,name))
+        run("INSERT OR IGNORE INTO team_members(team,user) VALUES(?,?)",(cur.lastrowid,u.effective_user.id))
         await u.effective_message.reply_text(f"✅ Team {name} registered! 300 coins added.")
     except sqlite3.IntegrityError: await u.effective_message.reply_text("You already have a team or that team name is taken.")
+async def jointeam(u,c):
+    if not c.args: return await u.effective_message.reply_text("Use: /jointeam TeamName")
+    name=" ".join(c.args).strip()
+    t=run("SELECT * FROM teams WHERE chat=? AND lower(name)=lower(?)",(u.effective_chat.id,name)).fetchone()
+    if not t: return await u.effective_message.reply_text("Team not found. Use /listteams.")
+    if team(u.effective_chat.id,u.effective_user.id): return await u.effective_message.reply_text("You are already in a team. Use /leaveteam first.")
+    try:
+        run("INSERT INTO team_members(team,user) VALUES(?,?)",(t["id"],u.effective_user.id))
+        await u.effective_message.reply_text(f"You joined {t['name']}!")
+    except sqlite3.IntegrityError:
+        await u.effective_message.reply_text("You are already a member of this team.")
+
+async def leaveteam(u,c):
+    t=team(u.effective_chat.id,u.effective_user.id)
+    if not t: return await u.effective_message.reply_text("You are not in a team.")
+    if t["owner"]==u.effective_user.id:
+        return await u.effective_message.reply_text("Team captain cannot leave. Use /removeteam (admin) or transfer ownership first.")
+    run("DELETE FROM team_members WHERE team=? AND user=?",(t["id"],u.effective_user.id))
+    await u.effective_message.reply_text(f"You left {t['name']}.")
+
+async def listteams(u,c):
+    rows=run("SELECT t.name,t.coins,t.id,COUNT(m.user) members,(SELECT COUNT(*) FROM roster r WHERE r.team=t.id) players FROM teams t LEFT JOIN team_members m ON m.team=t.id WHERE t.chat=? GROUP BY t.id ORDER BY t.name",(u.effective_chat.id,)).fetchall()
+    await u.effective_message.reply_text("👥 TEAMS\n"+("\n".join(f"{x['name']} · {x['members']} members · {x['players']}/5 actresses · {x['coins']} coins" for x in rows) if rows else "No teams yet. Use /addteam TeamName."))
+
+async def team_details(u,c):
+    if c.args:
+        t=run("SELECT * FROM teams WHERE chat=? AND lower(name)=lower(?)",(u.effective_chat.id," ".join(c.args))).fetchone()
+    else:
+        t=team(u.effective_chat.id,u.effective_user.id)
+    if not t: return await u.effective_message.reply_text("Team not found. Use /team TeamName or /listteams.")
+    members=run("SELECT user FROM team_members WHERE team=? ORDER BY joined_at",(t["id"],)).fetchall()
+    players=roster(t["id"])
+    await u.effective_message.reply_text(f"🏆 {t['name']}\nCaptain ID: {t['owner']}\nMembers: {len(members)}\nWallet: {t['coins']} coins\nRoster: {len(players)}/5\n"+("\n".join(f"• {x['name']} ({x['paid']} coins)" for x in players) if players else "No actresses drafted yet."))
+
+async def removeteam(u,c):
+    if not is_admin(u.effective_user.id): return await u.effective_message.reply_text("Admin only.")
+    if not c.args: return await u.effective_message.reply_text("Use: /removeteam TeamName")
+    t=run("SELECT id,name FROM teams WHERE chat=? AND lower(name)=lower(?)",(u.effective_chat.id," ".join(c.args))).fetchone()
+    if not t: return await u.effective_message.reply_text("Team not found.")
+    run("DELETE FROM team_members WHERE team=?",(t["id"],)); run("DELETE FROM roster WHERE team=?",(t["id"],)); run("DELETE FROM submissions WHERE team=?",(t["id"],)); run("DELETE FROM teams WHERE id=?",(t["id"],))
+    await u.effective_message.reply_text(f"Team {t['name']} removed.")
+
 async def myteam(u,c):
     t=team(u.effective_chat.id,u.effective_user.id)
     if not t: return await u.effective_message.reply_text("Register first: /addteam Royal")
@@ -67,14 +114,24 @@ async def leaderboard(u,c):
     rows=run("SELECT t.name,t.coins,COUNT(r.actress) n FROM teams t LEFT JOIN roster r ON r.team=t.id WHERE t.chat=? GROUP BY t.id ORDER BY n DESC,t.coins DESC",(u.effective_chat.id,)).fetchall()
     await u.effective_message.reply_text("🏆 LEADERBOARD\n"+("\n".join(f"{i}. {x['name']} — {x['n']}/5 · {x['coins']} coins" for i,x in enumerate(rows,1)) if rows else "No teams yet."))
 async def list_actresses(u,c):
-    rows=run("SELECT name,price,used FROM actresses ORDER BY name").fetchall()
-    await u.effective_message.reply_text("🎬 ACTRESS LIST\n"+("\n".join(f"{x['name']} — {x['price']} coins"+(" (auctioned)" if x['used'] else "") for x in rows) if rows else "List empty. Admin: /addactress Name, Price, ImageURL"))
+    rows=run("SELECT a.name,a.price,CASE WHEN u.actress IS NULL THEN 0 ELSE 1 END used FROM actresses a LEFT JOIN actress_used u ON u.actress=a.id AND u.chat=? ORDER BY a.name",(u.effective_chat.id,)).fetchall()
+    await u.effective_message.reply_text("🎬 ACTRESS LIST\n"+("\n".join(f"{x['name']} — {x['price']} coins"+(" (auctioned in this group)" if x['used'] else "") for x in rows) if rows else "List empty. Admin: /addactress Name, Price, ImageURL"))
 async def addactress(u,c):
     if not is_admin(u.effective_user.id): return await u.effective_message.reply_text("Admin only.")
     p=u.effective_message.text.partition(" ")[2].split(",",2)
     if len(p)!=3 or not p[1].strip().isdigit(): return await u.effective_message.reply_text("Use: /addactress Name, Price, ImageURL")
     run("INSERT OR IGNORE INTO actresses(name,price,image) VALUES(?,?,?)",(p[0].strip(),int(p[1]),p[2].strip()))
     await u.effective_message.reply_text("Actress added (if name was new).")
+async def removeactress(u,c):
+    if not is_admin(u.effective_user.id): return await u.effective_message.reply_text("Admin only.")
+    if not c.args: return await u.effective_message.reply_text("Use: /removeactress Actress Name")
+    name=" ".join(c.args)
+    a=run("SELECT id FROM actresses WHERE lower(name)=lower(?)",(name,)).fetchone()
+    if not a: return await u.effective_message.reply_text("Actress not found.")
+    if run("SELECT 1 FROM roster WHERE actress=?",(a["id"],)).fetchone(): return await u.effective_message.reply_text("Cannot remove: actress is already in a team roster.")
+    run("DELETE FROM actress_used WHERE actress=?",(a["id"],)); run("DELETE FROM actresses WHERE id=?",(a["id"],))
+    await u.effective_message.reply_text(f"Removed {name}.")
+
 async def addquestion(u,c):
     if not is_admin(u.effective_user.id): return await u.effective_message.reply_text("Admin only.")
     p=u.effective_message.text.partition(" ")[2].split(",",2)
@@ -91,6 +148,10 @@ async def guess(u,c):
     try: await u.effective_message.reply_photo(q["image"],caption="Who is this actress? Reply with her name. First correct answer earns 10 coins!",reply_markup=kb)
     except: await u.effective_message.reply_text("Who is this actress? Hint button below.",reply_markup=kb)
 async def daily(u,c):
+    from datetime import date
+    chat=u.effective_chat.id; uid=u.effective_user.id; today=date.today().isoformat()
+    try: run("INSERT INTO daily_claims(chat,user,day) VALUES(?,?,?)",(chat,uid,today))
+    except sqlite3.IntegrityError: return await u.effective_message.reply_text("You have already attempted today's challenge. Come back tomorrow!")
     await guess(u,c)
 async def hint_button(u,c):
     q=u.callback_query; await q.answer()
@@ -112,7 +173,7 @@ async def startauction(u,c):
         n=run("SELECT COUNT(*) n FROM votes WHERE chat=? AND kind='start'",(chat,)).fetchone()["n"]
         if n<3: return await u.effective_message.reply_text(f"Auction start vote: {n}/3")
     if run("SELECT 1 FROM auction WHERE chat=?",(chat,)).fetchone(): return await u.effective_message.reply_text("Auction already active.")
-    a=run("SELECT * FROM actresses WHERE used=0 ORDER BY id LIMIT 1").fetchone()
+    a=run("SELECT * FROM actresses a WHERE NOT EXISTS (SELECT 1 FROM actress_used u WHERE u.chat=? AND u.actress=a.id) ORDER BY a.id LIMIT 1",(chat,)).fetchone()
     if not a: return await u.effective_message.reply_text("No available actresses. Admin add with /addactress.")
     run("INSERT OR REPLACE INTO auction VALUES(?,?,?,NULL)",(chat,a["id"],a["price"]-1))
     await show_auction(c,chat)
@@ -147,6 +208,7 @@ async def skip(u,c):
         run("INSERT OR IGNORE INTO votes VALUES(?,?,?)",(chat,u.effective_user.id,"skip"))
         n=run("SELECT COUNT(*) n FROM votes WHERE chat=? AND kind='skip'",(chat,)).fetchone()["n"]
         if n<2:return await u.effective_message.reply_text(f"Skip vote: {n}/2")
+    run("DELETE FROM votes WHERE chat=? AND kind='skip'",(chat,))
     await advance(c,chat,u.effective_message)
 async def advance(c,chat,msg):
     a=run("SELECT * FROM auction WHERE chat=?",(chat,)).fetchone()
@@ -157,11 +219,11 @@ async def advance(c,chat,msg):
                 run("UPDATE teams SET coins=coins-? WHERE id=?",(a["bid"],t["id"]))
                 run("INSERT OR IGNORE INTO roster VALUES(?,?,?)",(t["id"],a["actress"],a["bid"]))
                 await msg.reply_text(f"Winner: {t['name']} for {a['bid']} coins.")
-        run("UPDATE actresses SET used=1 WHERE id=?",(a["actress"],))
+        run("INSERT OR IGNORE INTO actress_used(chat,actress) VALUES(?,?)",(chat,a["actress"]))
         run("DELETE FROM auction WHERE chat=?",(chat,))
-    nxt=run("SELECT * FROM actresses WHERE used=0 ORDER BY id LIMIT 1").fetchone()
+    nxt=run("SELECT * FROM actresses a WHERE NOT EXISTS (SELECT 1 FROM actress_used u WHERE u.chat=? AND u.actress=a.id) ORDER BY a.id LIMIT 1",(chat,)).fetchone()
     if nxt:
-        run("INSERT OR REPLACE INTO auction VALUES(?,?,?,NULL)",(chat,nxt["id"],nxt["price"]-1)); await show_auction(c,chat)
+        run("INSERT OR REPLACE INTO auction VALUES(?,?,?,NULL)",(chat,nxt["id"],max(0,nxt["price"]-1))); await show_auction(c,chat)
     else: await msg.reply_text("Auction list finished.")
 async def next_cmd(u,c):
     if not is_admin(u.effective_user.id):return await u.effective_message.reply_text("Admin only.")
@@ -216,7 +278,7 @@ async def scoreboard(u,c):
 def main():
     if not TOKEN: raise RuntimeError("Set BOT_TOKEN in Heroku Config Vars.")
     app=Application.builder().token(TOKEN).build()
-    for name,fn in [("start",start),("help",start),("addteam",addteam),("myteam",myteam),("leaderboard",leaderboard),("list",list_actresses),("addactress",addactress),("addquestion",addquestion),("guess",guess),("daily",daily),("startauction",startauction),("skip",skip),("next",next_cmd),("endauction",endauction),("submit",submit),("queue",queue),("pollstart",pollstart),("endpoll",endpoll),("guessleaderboard",scoreboard)]:
+    for name,fn in [("start",start),("help",start),("addteam",addteam),("jointeam",jointeam),("leaveteam",leaveteam),("removeteam",removeteam),("listteams",listteams),("team",team_details),("myteam",myteam),("leaderboard",leaderboard),("list",list_actresses),("actresslist",list_actresses),("addactress",addactress),("removeactress",removeactress),("addquestion",addquestion),("guess",guess),("daily",daily),("startauction",startauction),("skip",skip),("next",next_cmd),("endauction",endauction),("submit",submit),("queue",queue),("pollstart",pollstart),("endpoll",endpoll),("guessleaderboard",scoreboard)]:
         app.add_handler(CommandHandler(name,fn))
     app.add_handler(CallbackQueryHandler(buttons,pattern="^(guess|auction|profile|leader|list|finale|daily|help)$"))
     app.add_handler(CallbackQueryHandler(hint_button,pattern="^hint:"))

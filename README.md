@@ -10,7 +10,8 @@ Telegram bot combining an actress photo-guess game and group auction game. Inter
 - Actress guessing game with hints and points
 - Daily challenge entry point
 - Guess leaderboard
-- Team registration with 300 coins
+- Team registration with 300 coins, captain/member support, joining/leaving and admin removal
+- Team directory and team detail commands
 - Actress catalog and live group auction
 - Numeric bids, skip voting, auction close
 - Five editorial photo categories for finale submissions
@@ -24,11 +25,20 @@ Telegram bot combining an actress photo-guess game and group auction game. Inter
 5. Set Config Vars: `BOT_TOKEN`, `ADMIN_IDS` (comma-separated numeric IDs).
 6. Enable the `worker` dyno.
 
-**Database note:** Heroku's local filesystem is ephemeral. `/tmp` is suitable only for testing; for lasting scores, teams, and auctions, migrate SQLite to PostgreSQL before production use.
+**Important database note:** Heroku local files (including `/tmp`) are ephemeral. This build still uses SQLite, so data can reset when the dyno is replaced/restarted. Do not treat it as persistent production storage. A PostgreSQL migration is still required for durable live data.
+
+## Team commands
+- `/addteam Royal` — create a team with 300 coins; creator becomes captain.
+- `/jointeam Royal` — join an existing team in this group. Each user can belong to one team per group.
+- `/leaveteam` — leave as a member (captain cannot leave).
+- `/myteam` — show your team and roster.
+- `/team Royal` — show a team; `/team` shows your own.
+- `/listteams` — list all teams in the current group.
+- `/removeteam Royal` — admin-only removal.
 
 ## Commands
-Players: `/start`, `/addteam Team`, `/myteam`, `/leaderboard`, `/list`, `/guess`, `/daily`, `/guessleaderboard`, `/startauction`, `/skip`, `/submit`.
-Admins: `/addactress Name, Price, ImageURL`, `/addquestion Answer, Hint, ImageURL`, `/next`, `/endauction`, `/queue`, `/pollstart`, `/endpoll`.
+Players: `/start`, `/addteam Team`, `/jointeam Team`, `/leaveteam`, `/myteam`, `/team [TeamName]`, `/listteams`, `/leaderboard`, `/list` (or `/actresslist`), `/guess`, `/daily`, `/guessleaderboard`, `/startauction`, `/skip`, `/submit`.
+Admins: `/addactress Name, Price, ImageURL`, `/addquestion Answer, Hint, ImageURL`, `/removeteam TeamName`, `/next`, `/endauction`, `/queue`, `/pollstart`, `/endpoll`.
 
 To use guess mode, admin adds question entries with a publicly accessible image URL. Example:
 `/addquestion Alia Bhatt, Starred in Gangubai Kathiawadi, https://example.org/alia.jpg`
