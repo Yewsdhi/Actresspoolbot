@@ -1,6 +1,6 @@
 
 import os, logging, random, sqlite3
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 TOKEN=os.getenv("BOT_TOKEN","")
@@ -34,16 +34,22 @@ def roster(tid):
     return run("SELECT a.name,r.paid FROM roster r JOIN actresses a ON a.id=r.actress WHERE r.team=?",(tid,)).fetchall()
 def menu():
     return InlineKeyboardMarkup([
-      [InlineKeyboardButton("🎮 Guess Actress",callback_data="guess"),InlineKeyboardButton("🔨 Auction",callback_data="auction")],
-      [InlineKeyboardButton("👤 My Profile",callback_data="profile"),InlineKeyboardButton("🏆 Leaderboard",callback_data="leader")],
-      [InlineKeyboardButton("📸 Poll Finale",callback_data="finale"),InlineKeyboardButton("🎁 Daily Challenge",callback_data="daily")],
-      [InlineKeyboardButton("📋 Actress List",callback_data="list"),InlineKeyboardButton("❓ Help",callback_data="help")]
+      [InlineKeyboardButton("➕ Add Team",callback_data="cmd:addteam"),InlineKeyboardButton("👥 Teams",callback_data="cmd:teams")],
+      [InlineKeyboardButton("👤 My Team",callback_data="profile"),InlineKeyboardButton("🏆 Leaderboard",callback_data="leader")],
+      [InlineKeyboardButton("🎬 Actress List",callback_data="list"),InlineKeyboardButton("🎯 Guess",callback_data="guess")],
+      [InlineKeyboardButton("🎁 Daily",callback_data="daily"),InlineKeyboardButton("🔨 Start Auction",callback_data="cmd:startauction")],
+      [InlineKeyboardButton("⏭ Skip Auction",callback_data="cmd:skip"),InlineKeyboardButton("📋 Queue",callback_data="cmd:queue")],
+      [InlineKeyboardButton("🗳 Start Poll",callback_data="cmd:pollstart"),InlineKeyboardButton("📊 End Poll",callback_data="cmd:endpoll")],
+      [InlineKeyboardButton("❓ All Commands",callback_data="help")]
     ])
 async def start(u:Update,c:ContextTypes.DEFAULT_TYPE):
     await u.effective_message.reply_text("👑 ACTRESS ARENA\n\nWelcome! Play actress guessing, join live auctions, collect coins and compete with friends.\n\nChoose a menu:",reply_markup=menu())
 async def buttons(u,c):
     q=u.callback_query; await q.answer()
-    if q.data=="help":
+    if q.data.startswith("cmd:"):
+        cmd=q.data.split(":",1)[1]
+        await q.message.reply_text("Use /"+cmd+" in this chat.")
+    elif q.data=="help":
         await q.message.reply_text("/addteam Name · /myteam · /teams · /leaderboard · /list\n/guess · /daily · /startauction · /skip\nAdmin: /addactress Name, Price, ImageURL\n/addquestion Answer, Hint, ImageURL\n/next · /endauction · /queue · /pollstart · /endpoll")
     elif q.data=="guess": await guess(u,c)
     elif q.data=="daily": await daily(u,c)
@@ -225,12 +231,37 @@ async def scoreboard(u,c):
 def main():
     if not TOKEN: raise RuntimeError("Set BOT_TOKEN in Heroku Config Vars.")
     app=Application.builder().token(TOKEN).build()
+    async def set_command_menu(application):
+        commands=[
+          BotCommand("start","Open Actress Arena menu"),
+          BotCommand("addteam","Register a team"),
+          BotCommand("myteam","Show your team and roster"),
+          BotCommand("teams","List registered teams"),
+          BotCommand("leaderboard","Show team leaderboard"),
+          BotCommand("list","Show actress list"),
+          BotCommand("guess","Guess the actress"),
+          BotCommand("daily","Daily challenge"),
+          BotCommand("startauction","Start or vote for auction"),
+          BotCommand("skip","Skip or vote to skip auction item"),
+          BotCommand("addactress","Admin: add actress"),
+          BotCommand("addquestion","Admin: add guess question"),
+          BotCommand("next","Admin: next auction item"),
+          BotCommand("endauction","Admin: end auction"),
+          BotCommand("queue","Admin: view submissions"),
+          BotCommand("pollstart","Admin: start poll"),
+          BotCommand("endpoll","Admin: end poll and show results"),
+          BotCommand("guessleaderboard","Show guess game scores"),
+          BotCommand("help","Show all commands")
+        ]
+        await application.bot.set_my_commands(commands)
+    app.post_init=set_command_menu
     for name,fn in [("start",start),("help",start),("addteam",addteam),("myteam",myteam),("teams",teams),("leaderboard",leaderboard),("list",list_actresses),("addactress",addactress),("addquestion",addquestion),("guess",guess),("daily",daily),("startauction",startauction),("skip",skip),("next",next_cmd),("endauction",endauction),("submit",submit),("queue",queue),("pollstart",pollstart),("endpoll",endpoll),("guessleaderboard",scoreboard)]:
         app.add_handler(CommandHandler(name,fn))
     app.add_handler(CallbackQueryHandler(buttons,pattern="^(guess|auction|profile|leader|list|finale|daily|help)$"))
     app.add_handler(CallbackQueryHandler(hint_button,pattern="^hint:"))
     app.add_handler(CallbackQueryHandler(vote,pattern="^vote:"))
     app.add_handler(MessageHandler(filters.PHOTO & filters.CaptionRegex(r"^/submit"),submit))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,text_guess))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,bids))
     app.run_polling(drop_pending_updates=True)
 if __name__=="__main__":

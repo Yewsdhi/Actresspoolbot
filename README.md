@@ -52,3 +52,7 @@ The photo categories are intentionally non-sexualized: `traditional`, `western`,
 
 ## Important setup
 Set `BOT_TOKEN` and `ADMIN_IDS` in your hosting provider. Only IDs listed in `ADMIN_IDS` can add actresses/questions, advance or end auctions, and start/end polls.
+
+
+## Telegram command menu
+On startup the bot registers the full Telegram `/` command menu using `set_my_commands`. The `/start` inline menu also links to the player and admin workflows. Admin commands are listed for convenience; the bot still enforces `ADMIN_IDS` permissions.
