@@ -10,8 +10,7 @@ Telegram bot combining an actress photo-guess game and group auction game. Inter
 - Actress guessing game with hints and points
 - Daily challenge entry point
 - Guess leaderboard
-- Team registration with 300 coins, captain/member support, joining/leaving and admin removal
-- Team directory and team detail commands
+- Team registration with 300 coins
 - Actress catalog and live group auction
 - Numeric bids, skip voting, auction close
 - Five editorial photo categories for finale submissions
@@ -25,20 +24,11 @@ Telegram bot combining an actress photo-guess game and group auction game. Inter
 5. Set Config Vars: `BOT_TOKEN`, `ADMIN_IDS` (comma-separated numeric IDs).
 6. Enable the `worker` dyno.
 
-**Important database note:** Heroku local files (including `/tmp`) are ephemeral. This build still uses SQLite, so data can reset when the dyno is replaced/restarted. Do not treat it as persistent production storage. A PostgreSQL migration is still required for durable live data.
-
-## Team commands
-- `/addteam Royal` — create a team with 300 coins; creator becomes captain.
-- `/jointeam Royal` — join an existing team in this group. Each user can belong to one team per group.
-- `/leaveteam` — leave as a member (captain cannot leave).
-- `/myteam` — show your team and roster.
-- `/team Royal` — show a team; `/team` shows your own.
-- `/listteams` — list all teams in the current group.
-- `/removeteam Royal` — admin-only removal.
+**Database note:** Heroku's local filesystem is ephemeral. `/tmp` is suitable only for testing; for lasting scores, teams, and auctions, migrate SQLite to PostgreSQL before production use.
 
 ## Commands
-Players: `/start`, `/addteam Team`, `/jointeam Team`, `/leaveteam`, `/myteam`, `/team [TeamName]`, `/listteams`, `/leaderboard`, `/list` (or `/actresslist`), `/guess`, `/daily`, `/guessleaderboard`, `/startauction`, `/skip`, `/submit`.
-Admins: `/addactress Name, Price, ImageURL`, `/addquestion Answer, Hint, ImageURL`, `/removeteam TeamName`, `/next`, `/endauction`, `/queue`, `/pollstart`, `/endpoll`.
+Players: `/start`, `/addteam Team`, `/myteam`, `/teams`, `/leaderboard`, `/list`, `/guess`, `/daily`, `/guessleaderboard`, `/startauction`, `/skip`, `/submit`.
+Admins: `/addactress Name, Price, ImageURL`, `/addquestion Answer, Hint, ImageURL`, `/next`, `/endauction`, `/queue`, `/pollstart`, `/endpoll`.
 
 To use guess mode, admin adds question entries with a publicly accessible image URL. Example:
 `/addquestion Alia Bhatt, Starred in Gangubai Kathiawadi, https://example.org/alia.jpg`
@@ -49,3 +39,16 @@ For auction, add actress records:
 The photo categories are intentionally non-sexualized: `traditional`, `western`, `redcarpet`, `casual`, `cinematic`. Use images you have rights to share.
 
 > The Deploy button points to the GitHub repository. It will only deploy this updated bot after the ZIP contents have been pushed to that repository.
+
+
+## Fixes in this build
+- Added `/teams` to show every registered team, roster count, and coins in the current chat.
+- Polls now have an active/closed state; voting is rejected after the admin ends the poll.
+- Prevents starting a second poll while one is already active.
+- Poll results now show team, actress, category, and vote totals.
+- Start/skip votes are cleared after reaching quorum so old votes cannot carry into the next round.
+- Auction opening bids are clamped to zero when an actress has a price of one coin.
+- Actress prices must be at least one coin.
+
+## Important setup
+Set `BOT_TOKEN` and `ADMIN_IDS` in your hosting provider. Only IDs listed in `ADMIN_IDS` can add actresses/questions, advance or end auctions, and start/end polls.
