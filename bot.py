@@ -3,6 +3,7 @@ import os, logging, random, sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.constants import ParseMode
 from html import escape
+from urllib.parse import quote
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 TOKEN=os.getenv("BOT_TOKEN","")
@@ -19,6 +20,120 @@ def run(sql,args=()):
 def init():
     run("CREATE TABLE IF NOT EXISTS teams(id INTEGER PRIMARY KEY,chat INTEGER,owner INTEGER,name TEXT,coins INTEGER,UNIQUE(chat,owner),UNIQUE(chat,name))")
     run("CREATE TABLE IF NOT EXISTS actresses(id INTEGER PRIMARY KEY,name TEXT UNIQUE,price INTEGER,image TEXT,used INTEGER DEFAULT 0)")
+    try:
+        run("ALTER TABLE actresses ADD COLUMN profile_url TEXT")
+    except sqlite3.OperationalError:
+        pass
+    # Built-in starter catalogue: image field links to a Wikimedia Commons image search;
+    # profile_url links to the actress's Wikipedia biography. No third-party image is hotlinked.
+    bollywood_seed = [
+        'Alia Bhatt',
+        'Deepika Padukone',
+        'Kareena Kapoor Khan',
+        'Priyanka Chopra Jonas',
+        'Katrina Kaif',
+        'Anushka Sharma',
+        'Shraddha Kapoor',
+        'Kiara Advani',
+        'Kriti Sanon',
+        'Kangana Ranaut',
+        'Vidya Balan',
+        'Taapsee Pannu',
+        'Bhumi Pednekar',
+        'Parineeti Chopra',
+        'Sonakshi Sinha',
+        'Janhvi Kapoor',
+        'Sara Ali Khan',
+        'Ananya Panday',
+        'Disha Patani',
+        'Rashmika Mandanna',
+        'Madhuri Dixit',
+        'Aishwarya Rai Bachchan',
+        'Rani Mukerji',
+        'Kajol',
+        'Preity Zinta',
+        'Shilpa Shetty',
+        'Sushmita Sen',
+        'Bipasha Basu',
+        'Lara Dutta',
+        "Genelia D'Souza",
+        'Sonam Kapoor',
+        'Jacqueline Fernandez',
+        'Nora Fatehi',
+        'Mrunal Thakur',
+        'Pooja Hegde',
+        'Yami Gautam',
+        "Ileana D'Cruz",
+        'Kajal Aggarwal',
+        'Tamannaah Bhatia',
+        'Rakul Preet Singh',
+        'Shriya Saran',
+        'Nushrratt Bharuccha',
+        'Huma Qureshi',
+        'Richa Chadha',
+        'Swara Bhasker',
+        'Amrita Rao',
+        'Ayesha Takia',
+        'Dia Mirza',
+        'Neha Dhupia',
+        'Esha Gupta',
+        'Raveena Tandon',
+        'Twinkle Khanna',
+        'Urmila Matondkar',
+        'Tabu',
+        'Manisha Koirala',
+        'Sonali Bendre',
+        'Karishma Kapoor',
+        'Juhi Chawla',
+        'Mahima Chaudhry',
+        'Namrata Shirodkar',
+        'Zeenat Aman',
+        'Rekha',
+        'Dimple Kapadia',
+        'Jaya Bachchan',
+        'Shabana Azmi',
+        'Smita Patil',
+        'Poonam Dhillon',
+        'Meenakshi Seshadri',
+        'Amrita Singh',
+        'Farah Naaz',
+        'Radhika Apte',
+        'Radhika Madan',
+        'Sanya Malhotra',
+        'Fatima Sana Shaikh',
+        'Konkona Sen Sharma',
+        'Tillotama Shome',
+        'Shefali Shah',
+        'Neena Gupta',
+        'Rasika Dugal',
+        'Mona Singh',
+        'Avneet Kaur',
+        'Palak Tiwari',
+        'Khushi Kapoor',
+        'Suhana Khan',
+        'Tara Sutaria',
+        'Pranitha Subhash',
+        'Aditi Rao Hydari',
+        'Sobhita Dhulipala',
+        'Sai Pallavi',
+        'Nimrat Kaur',
+        'Shanaya Kapoor',
+        'Mouni Roy',
+        'Aahana Kumra',
+        'Prachi Desai',
+        'Amisha Patel',
+        'Ritu Varma',
+        'Kriti Kharbanda',
+        'Madhurima Tuli',
+        'Sakshi Malik',
+        'Manushi Chhillar'
+    ]
+    for actress_name in bollywood_seed:
+        wiki_title = quote(actress_name.replace(" ", "_"), safe="_()'")
+        profile = "https://en.wikipedia.org/wiki/" + wiki_title
+        photo_search = "https://commons.wikimedia.org/wiki/Special:MediaSearch?type=image&search=" + quote(actress_name + " actress")
+        run("INSERT OR IGNORE INTO actresses(name,price,image,profile_url) VALUES(?,?,?,?)",
+            (actress_name, 100, photo_search, profile))
     run("CREATE TABLE IF NOT EXISTS roster(team INTEGER,actress INTEGER,paid INTEGER,UNIQUE(team,actress))")
     run("CREATE TABLE IF NOT EXISTS auction(chat INTEGER PRIMARY KEY,actress INTEGER,bid INTEGER,bidder INTEGER)")
     run("CREATE TABLE IF NOT EXISTS votes(chat INTEGER,user INTEGER,kind TEXT,UNIQUE(chat,user,kind))")
@@ -80,24 +195,28 @@ async def leaderboard(u,c):
     rows=run("SELECT t.name,t.coins,COUNT(r.actress) n FROM teams t LEFT JOIN roster r ON r.team=t.id WHERE t.chat=? GROUP BY t.id ORDER BY n DESC,t.coins DESC",(u.effective_chat.id,)).fetchall()
     await u.effective_message.reply_text("🏆 LEADERBOARD\n"+("\n".join(f"{i}. {x['name']} — {x['n']}/5 · {x['coins']} coins" for i,x in enumerate(rows,1)) if rows else "No teams yet."))
 async def list_actresses(u,c):
-    rows=run("SELECT name,price,image,used FROM actresses ORDER BY name COLLATE NOCASE").fetchall()
+    rows=run("SELECT name,price,image,used,profile_url FROM actresses ORDER BY name COLLATE NOCASE").fetchall()
     if not rows:
         return await u.effective_message.reply_text("🎬 Actress list is empty. Admin: /addactress Name, Price, ImageURL")
     lines=[]
     for i,x in enumerate(rows,1):
         name=escape(x["name"])
-        image=(x["image"] or "").strip()
+        profile=(x["profile_url"] or "").strip()
+        photo=(x["image"] or "").strip()
         status=" · Auctioned" if x["used"] else " · Available"
-        if image.startswith(("https://","http://")):
-            lines.append(f'{i}. <a href="{escape(image, quote=True)}">{name}</a> — {x["price"]} coins{status}')
-        else:
-            lines.append(f"{i}. {name} — {x['price']} coins{status} · No image link")
+        links=[]
+        if profile.startswith(("https://","http://")):
+            links.append(f'<a href="{escape(profile, quote=True)}">Profile</a>')
+        if photo.startswith(("https://","http://")):
+            links.append(f'<a href="{escape(photo, quote=True)}">Photo search</a>')
+        suffix=(" · "+" | ".join(links)) if links else " · No links"
+        lines.append(f"{i}. <b>{name}</b> — {x['price']} coins{status}{suffix}")
     chunks=[]
-    current="🔗 <b>ALL ACTRESS LINKS</b>\\n"
+    current="🎬 <b>BOLLYWOOD ACTRESS DATABASE</b>\\n"
     for line in lines:
         if len(current)+len(line)+1>3500:
             chunks.append(current)
-            current="🔗 <b>ALL ACTRESS LINKS (continued)</b>\\n"
+            current="🎬 <b>ACTRESS DATABASE (continued)</b>\\n"
         current+=line+"\\n"
     if current.strip(): chunks.append(current)
     for chunk in chunks:
@@ -106,7 +225,10 @@ async def addactress(u,c):
     if not is_admin(u.effective_user.id): return await u.effective_message.reply_text("Admin only.")
     p=u.effective_message.text.partition(" ")[2].split(",",2)
     if len(p)!=3 or not p[1].strip().isdigit() or int(p[1].strip()) < 1: return await u.effective_message.reply_text("Use: /addactress Name, Price (minimum 1), ImageURL")
-    run("INSERT OR IGNORE INTO actresses(name,price,image) VALUES(?,?,?)",(p[0].strip(),int(p[1]),p[2].strip()))
+    actress_name=p[0].strip()
+    profile="https://en.wikipedia.org/wiki/"+quote(actress_name.replace(" ","_"),safe="_()'")
+    run("INSERT OR IGNORE INTO actresses(name,price,image,profile_url) VALUES(?,?,?,?)",
+        (actress_name,int(p[1]),p[2].strip(),profile))
     await u.effective_message.reply_text("Actress added (if name was new).")
 async def addquestion(u,c):
     if not is_admin(u.effective_user.id): return await u.effective_message.reply_text("Admin only.")

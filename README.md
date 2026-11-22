@@ -56,3 +56,11 @@ Set `BOT_TOKEN` and `ADMIN_IDS` in your hosting provider. Only IDs listed in `AD
 
 ## Telegram command menu
 On startup the bot registers the full Telegram `/` command menu using `set_my_commands`. The `/start` inline menu also links to the player and admin workflows. Admin commands are listed for convenience; the bot still enforces `ADMIN_IDS` permissions.
+
+
+## Built-in Bollywood actress catalogue
+- Seeds 100 Bollywood actress entries into the `actresses` table automatically at bot startup.
+- `/list` and `/actresslist` show each entry's profile link and a Wikimedia Commons photo-search link.
+- Starter auction price is 100 coins per entry; change prices with your own admin workflow if desired.
+- Photo links open Commons image search results, not guaranteed direct image files. Choose/download a suitable image and use its direct image URL with `/addactress` if you need Telegram to display an actual photo.
+- Existing actress rows are preserved; seed insertion uses `INSERT OR IGNORE`.
